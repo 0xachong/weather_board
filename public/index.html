@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket 天气市场数据看板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1117; color: #e1e4e8; }
+  .header { background: linear-gradient(135deg, #1a1f36 0%, #0d1025 100%); padding: 28px 40px; border-bottom: 1px solid #2d3148; }
+  .header h1 { font-size: 24px; font-weight: 700; color: #fff; }
+  .header p { color: #8b8fa3; margin-top: 6px; font-size: 14px; }
+  .stats-bar { display: flex; gap: 24px; padding: 20px 40px; background: #161924; border-bottom: 1px solid #2d3148; flex-wrap: wrap; }
+  .stat-card { background: #1c2035; border-radius: 10px; padding: 16px 24px; min-width: 160px; border: 1px solid #2d3148; }
+  .stat-card .label { font-size: 12px; color: #8b8fa3; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 22px; font-weight: 700; color: #58a6ff; margin-top: 4px; }
+  .stat-card .value.green { color: #3fb950; }
+  .stat-card .value.purple { color: #bc8cff; }
+  .stat-card .value.orange { color: #f0883e; }
+  .container { padding: 24px 40px; }
+  .section { margin-bottom: 32px; }
+  .section-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #fff; display: flex; align-items: center; gap: 8px; }
+  .section-title .badge { font-size: 11px; background: #58a6ff22; color: #58a6ff; padding: 2px 8px; border-radius: 10px; }
+  .chart-container { background: #1c2035; border-radius: 12px; padding: 24px; border: 1px solid #2d3148; position: relative; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 1200px) { .chart-row { grid-template-columns: 1fr; } }
+  canvas { max-height: 400px; }
+
+  .city-selector { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .city-btn { padding: 6px 14px; border-radius: 8px; border: 1px solid #2d3148; background: #1c2035; color: #8b8fa3; cursor: pointer; font-size: 13px; transition: all .15s; }
+  .city-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+  .city-btn.active { background: #58a6ff22; border-color: #58a6ff; color: #58a6ff; font-weight: 600; }
+
+  .table-wrap { overflow-x: auto; max-height: 600px; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { position: sticky; top: 0; z-index: 2; }
+  th { background: #252a40; color: #8b8fa3; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 2px solid #2d3148; white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e2238; white-space: nowrap; }
+  tr:hover td { background: #1e2238; }
+  .winner-cell { color: #3fb950; font-weight: 600; }
+  .vol-bar { display: inline-block; height: 6px; border-radius: 3px; background: #58a6ff; vertical-align: middle; margin-left: 6px; }
+  .pending { color: #8b8fa3; font-style: italic; }
+
+  .heatmap-wrap { overflow-x: auto; }
+  .heatmap { display: grid; gap: 2px; font-size: 11px; }
+  .heatmap-cell { border-radius: 3px; padding: 4px; text-align: center; cursor: pointer; min-width: 40px; min-height: 32px; display: flex; align-items: center; justify-content: center; transition: transform .1s; }
+  .heatmap-cell:hover { transform: scale(1.15); z-index: 1; }
+  .heatmap-label { color: #8b8fa3; font-weight: 600; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; min-width: 120px; font-size: 12px; }
+  .heatmap-date { color: #8b8fa3; font-weight: 600; text-align: center; font-size: 10px; writing-mode: vertical-lr; min-height: 60px; display: flex; align-items: center; justify-content: center; }
+
+  .tooltip { position: fixed; background: #252a40; border: 1px solid #3d4260; border-radius: 8px; padding: 12px 16px; font-size: 12px; pointer-events: none; z-index: 100; display: none; max-width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .tooltip .tt-title { font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; }
+  .tooltip .tt-winner { color: #3fb950; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; background: #161924; border-radius: 10px; padding: 4px; width: fit-content; }
+  .tab { padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #8b8fa3; transition: all .15s; }
+  .tab:hover { color: #e1e4e8; }
+  .tab.active { background: #58a6ff22; color: #58a6ff; font-weight: 600; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Loading */
+  .loading-overlay { position: fixed; inset: 0; background: #0f1117ee; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
+  .loading-overlay.hidden { display: none; }
+  .spinner { width: 48px; height: 48px; border: 4px solid #2d3148; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { color: #8b8fa3; margin-top: 16px; font-size: 14px; }
+  .loading-progress { color: #58a6ff; margin-top: 8px; font-size: 20px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">正在从 Polymarket 拉取天气市场数据...</div>
+  <div class="loading-progress" id="loadProgress">0%</div>
+</div>
+
+<div class="header">
+  <h1>Polymarket 天气市场数据看板</h1>
+  <p id="headerSub">加载中...</p>
+</div>
+
+<div class="stats-bar" id="statsBar"></div>
+
+<div class="container">
+  <div class="tabs" id="mainTabs">
+    <div class="tab active" data-tab="overview">总览</div>
+    <div class="tab" data-tab="heatmap">热力图</div>
+    <div class="tab" data-tab="city-detail">城市详情</div>
+    <div class="tab" data-tab="table">数据表格</div>
+  </div>
+
+  <div class="tab-content active" id="tab-overview">
+    <div class="chart-row">
+      <div class="section">
+        <div class="section-title">城市总成交额 <span class="badge">前15名</span></div>
+        <div class="chart-container"><canvas id="chartCityVol"></canvas></div>
+      </div>
+      <div class="section">
+        <div class="section-title">每日总成交额（所有城市）</div>
+        <div class="chart-container"><canvas id="chartDailyVol"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-row" style="margin-top:24px">
+      <div class="section">
+        <div class="section-title">前10城市每日成交额趋势</div>
+        <div class="chart-container"><canvas id="chartTrend"></canvas></div>
+      </div>
+      <div class="section">
+        <div class="section-title">各区域成交额占比</div>
+        <div class="chart-container"><canvas id="chartRegion"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-heatmap">
+    <div class="section">
+      <div class="section-title">成交额热力图（城市 x 日期）</div>
+      <div class="chart-container"><div class="heatmap-wrap" id="heatmapWrap"></div></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-city-detail">
+    <div class="city-selector" id="citySelector"></div>
+    <div class="chart-row">
+      <div class="section">
+        <div class="section-title">每日成交额与获胜温度</div>
+        <div class="chart-container"><canvas id="chartCityDaily"></canvas></div>
+      </div>
+      <div class="section">
+        <div class="section-title">温度区间分布</div>
+        <div class="chart-container"><canvas id="chartTempDist"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-table">
+    <div class="section">
+      <div class="section-title">结算结果表</div>
+      <div class="chart-container">
+        <div class="city-selector" id="tableCitySelector"></div>
+        <div class="table-wrap">
+          <table id="dataTable">
+            <thead><tr><th>城市</th><th>日期</th><th>获胜温度</th><th>事件成交额</th><th>状态</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const CITIES = [
+  "nyc","chicago","miami","los-angeles","atlanta","dallas","houston",
+  "denver","san-francisco","toronto","mexico-city","panama-city",
+  "sao-paulo","buenos-aires","paris","london","madrid","amsterdam",
+  "tokyo","singapore","hong-kong","seoul","shanghai","beijing",
+  "taipei","jakarta","istanbul","moscow","tel-aviv","austin","seattle",
+  "shenzhen","chengdu","wuhan","chongqing","wellington","warsaw","kuala-lumpur","helsinki"
+];
+
+const CITY_LABELS = {
+  'nyc':'纽约','chicago':'芝加哥','miami':'迈阿密','los-angeles':'洛杉矶','atlanta':'亚特兰大',
+  'dallas':'达拉斯','houston':'休斯顿','denver':'丹佛','san-francisco':'旧金山','toronto':'多伦多',
+  'mexico-city':'墨西哥城','panama-city':'巴拿马城','sao-paulo':'圣保罗','buenos-aires':'布宜诺斯艾利斯',
+  'paris':'巴黎','london':'伦敦','madrid':'马德里','amsterdam':'阿姆斯特丹','tokyo':'东京',
+  'singapore':'新加坡','hong-kong':'香港','seoul':'首尔','shanghai':'上海','beijing':'北京',
+  'taipei':'台北','jakarta':'雅加达','istanbul':'伊斯坦布尔','moscow':'莫斯科','tel-aviv':'特拉维夫',
+  'austin':'奥斯汀','seattle':'西雅图','shenzhen':'深圳','chengdu':'成都','wuhan':'武汉',
+  'chongqing':'重庆','wellington':'惠灵顿','warsaw':'华沙','kuala-lumpur':'吉隆坡','helsinki':'赫尔辛基'
+};
+
+const REGION_MAP = {
+  '美洲': ['nyc','chicago','miami','los-angeles','atlanta','dallas','houston','denver','san-francisco','toronto','mexico-city','panama-city','sao-paulo','buenos-aires','austin','seattle'],
+  '欧洲': ['paris','london','madrid','amsterdam','istanbul','moscow','warsaw','helsinki'],
+  '亚太': ['tokyo','singapore','hong-kong','seoul','shanghai','beijing','taipei','jakarta','tel-aviv','shenzhen','chengdu','wuhan','chongqing','kuala-lumpur','wellington']
+};
+
+const COLORS = ['#58a6ff','#3fb950','#bc8cff','#f0883e','#f778ba','#79c0ff','#56d364','#d2a8ff','#ffa657','#ff7b72',
+                '#a5d6ff','#7ee787','#e2c5ff','#ffc680','#ffa198','#cae8ff','#aff5b4','#eddeff','#ffe2b2','#ffd8d3'];
+
+const MONTHS_EN = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+let DATA = null;
+
+function label(c) { return CITY_LABELS[c] || c; }
+function fmt(n) { return n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(0)}K` : `$${n.toFixed(0)}`; }
+function shortDate(d) { return d.slice(5); }
+
+function getDateRange() {
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 60);
+  const dates = [];
+  const cur = new Date(start);
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+// === Data fetching with localStorage cache ===
+const CACHE_KEY = 'weather_board_cache';
+const CACHE_TTL = 3600 * 1000; // 1 hour
+
+function getCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    if (Date.now() - cache.ts > CACHE_TTL) { localStorage.removeItem(CACHE_KEY); return null; }
+    return cache.data;
+  } catch { return null; }
+}
+
+function setCache(data) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+  } catch {}
+}
+
+function buildSlug(city, dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  return `highest-temperature-in-${city}-on-${MONTHS_EN[d.getUTCMonth()]}-${d.getUTCDate()}-${d.getUTCFullYear()}`;
+}
+
+async function fetchOneEvent(city, date) {
+  const url = `/api/data?city=${city}&date=${date}`;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || data.length === 0) return null;
+    const event = data[0];
+    const markets = event.markets || [];
+    const breakdown = markets.map(m => {
+      let prices = [];
+      try { prices = typeof m.outcomePrices === 'string' ? JSON.parse(m.outcomePrices) : (m.outcomePrices || []); } catch {}
+      return {
+        range: m.groupItemTitle || '',
+        volume: Math.round((m.volumeNum || 0) * 100) / 100,
+        is_winner: prices.length > 0 && parseFloat(prices[0]) === 1.0
+      };
+    });
+    return { city, date, event_total_volume: Math.round((event.volume || 0) * 100) / 100, is_closed: !!event.closed, breakdown };
+  } catch { return null; }
+}
+
+async function fetchAllData() {
+  // Check cache first
+  const cached = getCache();
+  if (cached) return cached;
+
+  const dates = getDateRange();
+  const tasks = [];
+  for (const city of CITIES) {
+    for (const date of dates) {
+      tasks.push({ city, date });
+    }
+  }
+
+  const total = tasks.length;
+  const events = [];
+  const CONCURRENCY = 30;
+  let done = 0;
+
+  for (let i = 0; i < total; i += CONCURRENCY) {
+    const batch = tasks.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(t => fetchOneEvent(t.city, t.date)));
+    events.push(...results.filter(Boolean));
+    done += batch.length;
+    document.getElementById('loadProgress').textContent = `${Math.round(done / total * 100)}%`;
+  }
+
+  // Build aggregated data
+  const cityDaily = {}, cityTotal = {}, winners = {}, eventBreakdown = {};
+  const allDates = new Set();
+
+  for (const ev of events) {
+    const { city, date, event_total_volume, breakdown } = ev;
+    allDates.add(date);
+    if (!cityDaily[city]) cityDaily[city] = {};
+    cityDaily[city][date] = event_total_volume;
+    if (!cityTotal[city]) cityTotal[city] = 0;
+    const key = `${city}|${date}`;
+    eventBreakdown[key] = breakdown;
+    for (const b of breakdown) {
+      cityTotal[city] += b.volume;
+      if (b.is_winner) winners[key] = b.range;
+    }
+  }
+
+  const sortedDates = [...allDates].sort();
+  const sortedCities = Object.keys(cityTotal).sort((a, b) => cityTotal[b] - cityTotal[a]);
+
+  const data = { dates: sortedDates, cities: sortedCities, cityTotal, cityDaily, winners, eventBreakdown };
+  setCache(data);
+  return data;
+}
+
+// === Rendering ===
+function renderStats() {
+  const totalVol = Object.values(DATA.cityTotal).reduce((a,b) => a+b, 0);
+  const totalWinners = Object.keys(DATA.winners).length;
+  const totalEvents = Object.entries(DATA.cityDaily).reduce((a, [c, days]) => a + Object.keys(days).length, 0);
+  document.getElementById('headerSub').textContent = `${DATA.dates[0]} ~ ${DATA.dates[DATA.dates.length-1]} | ${DATA.cities.length} 个城市 | 每日最高温度预测市场`;
+  document.getElementById('statsBar').innerHTML = `
+    <div class="stat-card"><div class="label">总成交额</div><div class="value">${fmt(totalVol)}</div></div>
+    <div class="stat-card"><div class="label">城市数</div><div class="value green">${DATA.cities.length}</div></div>
+    <div class="stat-card"><div class="label">事件数</div><div class="value purple">${totalEvents}</div></div>
+    <div class="stat-card"><div class="label">已结算</div><div class="value orange">${totalWinners}</div></div>
+    <div class="stat-card"><div class="label">日期范围</div><div class="value" style="font-size:16px">${DATA.dates[0]} ~ ${DATA.dates[DATA.dates.length-1]}</div></div>
+  `;
+}
+
+function renderOverview() {
+  const top15 = DATA.cities.slice(0, 15);
+  new Chart(document.getElementById('chartCityVol'), {
+    type: 'bar',
+    data: {
+      labels: top15.map(label),
+      datasets: [{ data: top15.map(c => DATA.cityTotal[c]),
+        backgroundColor: top15.map((_, i) => COLORS[i % COLORS.length] + '99'),
+        borderColor: top15.map((_, i) => COLORS[i % COLORS.length]),
+        borderWidth: 1, borderRadius: 4 }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmt(ctx.raw) } } },
+      scales: { x: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2d3148' } },
+                y: { ticks: { color: '#e1e4e8' }, grid: { display: false } } }
+    }
+  });
+
+  const dailyVol = DATA.dates.map(d => {
+    let sum = 0; for (const c of DATA.cities) sum += (DATA.cityDaily[c]?.[d] || 0); return sum;
+  });
+  new Chart(document.getElementById('chartDailyVol'), {
+    type: 'bar',
+    data: { labels: DATA.dates.map(shortDate),
+      datasets: [{ data: dailyVol, backgroundColor: '#58a6ff66', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3 }] },
+    options: { responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmt(ctx.raw) } } },
+      scales: { x: { ticks: { color: '#8b8fa3', maxRotation: 60 }, grid: { display: false } },
+                y: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2d3148' } } } }
+  });
+
+  const top10 = DATA.cities.slice(0, 10);
+  new Chart(document.getElementById('chartTrend'), {
+    type: 'line',
+    data: { labels: DATA.dates.map(shortDate),
+      datasets: top10.map((c, i) => ({
+        label: label(c), data: DATA.dates.map(d => DATA.cityDaily[c]?.[d] || null),
+        borderColor: COLORS[i], backgroundColor: COLORS[i] + '22',
+        borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true
+      }))
+    },
+    options: { responsive: true, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: '#e1e4e8', usePointStyle: true, pointStyle: 'circle', boxWidth: 6 } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.raw || 0)}` } } },
+      scales: { x: { ticks: { color: '#8b8fa3', maxRotation: 60 }, grid: { display: false } },
+                y: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2d3148' } } } }
+  });
+
+  const regionData = {};
+  for (const [region, cities] of Object.entries(REGION_MAP))
+    regionData[region] = cities.reduce((a, c) => a + (DATA.cityTotal[c] || 0), 0);
+  new Chart(document.getElementById('chartRegion'), {
+    type: 'doughnut',
+    data: { labels: Object.keys(regionData),
+      datasets: [{ data: Object.values(regionData), backgroundColor: ['#58a6ff','#3fb950','#f0883e'], borderColor: '#1c2035', borderWidth: 3 }] },
+    options: { responsive: true,
+      plugins: { legend: { labels: { color: '#e1e4e8', usePointStyle: true, pointStyle: 'circle' } },
+        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${fmt(ctx.raw)} (${(ctx.raw / Object.values(regionData).reduce((a,b)=>a+b,0) * 100).toFixed(1)}%)` } } } }
+  });
+}
+
+function renderHeatmap() {
+  const wrap = document.getElementById('heatmapWrap');
+  const { cities, dates } = DATA;
+  let maxVol = 0;
+  for (const c of cities) for (const d of dates) { const v = DATA.cityDaily[c]?.[d] || 0; if (v > maxVol) maxVol = v; }
+
+  let html = `<div class="heatmap" style="grid-template-columns: 120px repeat(${dates.length}, 1fr);">`;
+  html += `<div></div>`;
+  for (const d of dates) html += `<div class="heatmap-date">${shortDate(d)}</div>`;
+  for (const c of cities) {
+    html += `<div class="heatmap-label">${label(c)}</div>`;
+    for (const d of dates) {
+      const v = DATA.cityDaily[c]?.[d] || 0;
+      const intensity = v > 0 ? Math.max(0.1, v / maxVol) : 0;
+      const winner = DATA.winners[`${c}|${d}`] || '';
+      const bg = v === 0 ? '#1a1d2e' : `rgba(88, 166, 255, ${intensity})`;
+      html += `<div class="heatmap-cell" style="background:${bg}" data-city="${c}" data-date="${d}" data-vol="${v}" data-winner="${winner}">${v > 0 ? fmt(v) : ''}</div>`;
+    }
+  }
+  html += '</div>';
+  wrap.innerHTML = html;
+
+  const tooltip = document.getElementById('tooltip');
+  wrap.addEventListener('mousemove', e => {
+    const cell = e.target.closest('.heatmap-cell');
+    if (!cell) { tooltip.style.display = 'none'; return; }
+    const { city, date, vol, winner } = cell.dataset;
+    tooltip.innerHTML = `
+      <div class="tt-title">${label(city)} - ${date}</div>
+      <div class="tt-row"><span>成交额:</span><span>${fmt(+vol)}</span></div>
+      ${winner ? `<div class="tt-row tt-winner"><span>获胜温度:</span><span>${winner}</span></div>` : '<div class="tt-row"><span class="pending">待结算</span></div>'}
+    `;
+    tooltip.style.display = 'block';
+    tooltip.style.left = Math.min(e.clientX + 12, window.innerWidth - 340) + 'px';
+    tooltip.style.top = (e.clientY + 12) + 'px';
+  });
+  wrap.addEventListener('mouseleave', () => tooltip.style.display = 'none');
+}
+
+let cityChartDaily = null, cityChartDist = null;
+function renderCityDetail(city) {
+  const sel = document.getElementById('citySelector');
+  sel.innerHTML = DATA.cities.map(c =>
+    `<div class="city-btn ${c === city ? 'active' : ''}" data-city="${c}">${label(c)}</div>`
+  ).join('');
+  sel.onclick = e => { const btn = e.target.closest('.city-btn'); if (btn) renderCityDetail(btn.dataset.city); };
+
+  const dates = DATA.dates.filter(d => DATA.cityDaily[city]?.[d] !== undefined);
+  const vols = dates.map(d => DATA.cityDaily[city][d]);
+  const winnerLabels = dates.map(d => DATA.winners[`${city}|${d}`] || '');
+
+  if (cityChartDaily) cityChartDaily.destroy();
+  cityChartDaily = new Chart(document.getElementById('chartCityDaily'), {
+    type: 'bar',
+    data: { labels: dates.map(shortDate),
+      datasets: [{ label: '成交额', data: vols,
+        backgroundColor: vols.map((_, i) => winnerLabels[i] ? '#58a6ff88' : '#58a6ff33'),
+        borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3 }]
+    },
+    options: { responsive: true,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: {
+          afterLabel: ctx => winnerLabels[ctx.dataIndex] ? `获胜温度: ${winnerLabels[ctx.dataIndex]}` : '待结算',
+          label: ctx => `成交额: ${fmt(ctx.raw)}`
+        } } },
+      scales: { x: { ticks: { color: '#8b8fa3', maxRotation: 60 }, grid: { display: false } },
+                y: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2d3148' } } }
+    }
+  });
+
+  const tempVol = {}, tempWins = {};
+  for (const d of dates) {
+    const bd = DATA.eventBreakdown[`${city}|${d}`];
+    if (!bd) continue;
+    for (const item of bd) {
+      tempVol[item.range] = (tempVol[item.range] || 0) + item.volume;
+      if (item.is_winner) tempWins[item.range] = (tempWins[item.range] || 0) + 1;
+    }
+  }
+  const ranges = Object.keys(tempVol);
+
+  if (cityChartDist) cityChartDist.destroy();
+  cityChartDist = new Chart(document.getElementById('chartTempDist'), {
+    type: 'bar',
+    data: { labels: ranges,
+      datasets: [
+        { label: '总成交额', data: ranges.map(r => tempVol[r]), backgroundColor: '#58a6ff66', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3, yAxisID: 'y' },
+        { label: '获胜次数', data: ranges.map(r => tempWins[r] || 0), type: 'line', borderColor: '#3fb950', backgroundColor: '#3fb95033', pointRadius: 4, pointBackgroundColor: '#3fb950', yAxisID: 'y1', tension: 0.3 }
+      ]
+    },
+    options: { responsive: true,
+      plugins: { legend: { labels: { color: '#e1e4e8', usePointStyle: true } },
+        tooltip: { callbacks: { label: ctx => ctx.dataset.label === '总成交额' ? fmt(ctx.raw) : `${ctx.raw} 次获胜` } } },
+      scales: { x: { ticks: { color: '#8b8fa3', maxRotation: 45 }, grid: { display: false } },
+                y: { position: 'left', ticks: { color: '#58a6ff', callback: v => fmt(v) }, grid: { color: '#2d3148' } },
+                y1: { position: 'right', ticks: { color: '#3fb950' }, grid: { display: false } } }
+    }
+  });
+}
+
+function renderTable(filterCity) {
+  const sel = document.getElementById('tableCitySelector');
+  sel.innerHTML = `<div class="city-btn ${!filterCity ? 'active' : ''}" data-city="">全部城市</div>` +
+    DATA.cities.map(c => `<div class="city-btn ${c === filterCity ? 'active' : ''}" data-city="${c}">${label(c)}</div>`).join('');
+  sel.onclick = e => { const btn = e.target.closest('.city-btn'); if (btn) renderTable(btn.dataset.city || null); };
+
+  const tbody = document.querySelector('#dataTable tbody');
+  let html = '';
+  const cities = filterCity ? [filterCity] : DATA.cities;
+  const maxVol = Math.max(...DATA.cities.flatMap(cc => DATA.dates.map(dd => DATA.cityDaily[cc]?.[dd] || 0)));
+
+  for (const c of cities) {
+    const dates = DATA.dates.filter(d => DATA.cityDaily[c]?.[d] !== undefined);
+    for (const d of dates) {
+      const vol = DATA.cityDaily[c][d];
+      const winner = DATA.winners[`${c}|${d}`];
+      const barW = Math.max(2, (vol / maxVol) * 100);
+      html += `<tr>
+        <td>${label(c)}</td><td>${d}</td>
+        <td class="${winner ? 'winner-cell' : 'pending'}">${winner || '待结算...'}</td>
+        <td>${fmt(vol)}<span class="vol-bar" style="width:${barW}px"></span></td>
+        <td>${winner ? '已结算' : '进行中'}</td>
+      </tr>`;
+    }
+  }
+  tbody.innerHTML = html;
+}
+
+function setupTabs() {
+  document.getElementById('mainTabs').onclick = e => {
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  };
+}
+
+async function main() {
+  DATA = await fetchAllData();
+  document.getElementById('loading').classList.add('hidden');
+  renderStats();
+  renderOverview();
+  renderHeatmap();
+  renderCityDetail(DATA.cities[0]);
+  renderTable(null);
+  setupTabs();
+}
+
+main();
+</script>
+</body>
+</html>
