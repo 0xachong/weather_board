@@ -340,12 +340,13 @@ function renderOverview() {
     }
   });
 
-  const dailyVol = DATA.dates.map(d => {
+  const datesDesc = [...DATA.dates].sort((a, b) => b.localeCompare(a));
+  const dailyVol = datesDesc.map(d => {
     let sum = 0; for (const c of DATA.cities) sum += (DATA.cityDaily[c]?.[d] || 0); return sum;
   });
   new Chart(document.getElementById('chartDailyVol'), {
     type: 'bar',
-    data: { labels: DATA.dates.map(shortDate),
+    data: { labels: datesDesc.map(shortDate),
       datasets: [{ data: dailyVol, backgroundColor: '#58a6ff66', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3 }] },
     options: { responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmt(ctx.raw) } } },
       scales: { x: { ticks: { color: '#8b8fa3', maxRotation: 60 }, grid: { display: false } },
@@ -355,9 +356,9 @@ function renderOverview() {
   const top10 = DATA.cities.slice(0, 10);
   new Chart(document.getElementById('chartTrend'), {
     type: 'line',
-    data: { labels: DATA.dates.map(shortDate),
+    data: { labels: datesDesc.map(shortDate),
       datasets: top10.map((c, i) => ({
-        label: label(c), data: DATA.dates.map(d => DATA.cityDaily[c]?.[d] || null),
+        label: label(c), data: datesDesc.map(d => DATA.cityDaily[c]?.[d] || null),
         borderColor: COLORS[i], backgroundColor: COLORS[i] + '22',
         borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true
       }))
@@ -433,7 +434,7 @@ function renderCityDetail(city) {
   ).join('');
   sel.onclick = e => { const btn = e.target.closest('.city-btn'); if (btn) renderCityDetail(btn.dataset.city); };
 
-  const dates = DATA.dates.filter(d => DATA.cityDaily[city]?.[d] !== undefined);
+  const dates = DATA.dates.filter(d => DATA.cityDaily[city]?.[d] !== undefined).sort((a, b) => b.localeCompare(a));
   const vols = dates.map(d => DATA.cityDaily[city][d]);
   const winnerLabels = dates.map(d => DATA.winners[`${city}|${d}`] || '');
 
@@ -498,7 +499,7 @@ function renderTable(filterCity) {
   const maxVol = Math.max(...DATA.cities.flatMap(cc => DATA.dates.map(dd => DATA.cityDaily[cc]?.[dd] || 0)));
 
   for (const c of cities) {
-    const dates = DATA.dates.filter(d => DATA.cityDaily[c]?.[d] !== undefined);
+    const dates = DATA.dates.filter(d => DATA.cityDaily[c]?.[d] !== undefined).sort((a, b) => b.localeCompare(a));
     for (const d of dates) {
       const vol = DATA.cityDaily[c][d];
       const winner = DATA.winners[`${c}|${d}`];
